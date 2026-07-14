@@ -28,13 +28,27 @@ def get_profile(request, user_id):
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def get_user_by_email(request):
-    """Get or create user by email — for Firebase login"""
-    email = request.query_params.get('email')
-    username = request.query_params.get('username', email)
+    """Get or create user by email"""
+    email    = request.query_params.get('email')
+    username = request.query_params.get('username', '')
     if not email:
         return Response({'error': 'Email required'}, status=status.HTTP_400_BAD_REQUEST)
-    user, created = User.objects.get_or_create(
-        email=email,
-        defaults={'username': username}
-    )
-    return Response({**UserSerializer(user).data, 'is_new': created})
+
+    # Pehle email se dhundho
+    try:
+        user = User.objects.get(email=email)
+        return Response({**UserSerializer(user).data, 'is_new': False})
+    except User.DoesNotExist:
+        pass
+
+    # Phir username se dhundho
+    if username:
+        try:
+            user = User.objects.get(username=username)
+            return Response({**UserSerializer(user).data, 'is_new': False})
+        except User.DoesNotExist:
+            pass
+
+    # Naya user banao
+    user = User.objects.create(email=email, username=username or email)
+    return Response({**UserSerializer(user).data, 'is_new': True})

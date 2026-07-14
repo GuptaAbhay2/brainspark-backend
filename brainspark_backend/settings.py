@@ -63,6 +63,8 @@ TEMPLATES = [
 WSGI_APPLICATION = 'brainspark_backend.wsgi.application'
 
 # Database — SQLite locally, PostgreSQL on Railway
+
+import os
 import dj_database_url
 
 DATABASES = {

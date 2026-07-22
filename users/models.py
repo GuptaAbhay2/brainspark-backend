@@ -1,12 +1,9 @@
 from django.db import models
 
 class User(models.Model):
-    """
-    Custom user model — NOT extending AbstractUser.
-    We use Firebase for auth, so we just store profile data here.
-    """
     username        = models.CharField(max_length=50, unique=True)
-    email           = models.EmailField(unique=True)
+    email           = models.EmailField(unique=True, blank=True, null=True)
+    password_hash   = models.CharField(max_length=64, blank=True, default='')
     avatar          = models.CharField(max_length=10, default='🧠')
     brain_score     = models.IntegerField(default=0)
     total_games     = models.IntegerField(default=0)

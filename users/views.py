@@ -58,21 +58,16 @@ def get_profile(request, user_id):
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def get_user_by_email(request):
-    """Keep for backwards compat"""
+    """Keep for backwards compat — strictly read only"""
     email    = request.query_params.get('email', '')
     username = request.query_params.get('username', '')
-    try:
+    
+    if username and User.objects.filter(username=username).exists():
         user = User.objects.get(username=username)
         return Response({**UserSerializer(user).data, 'is_new': False})
-    except User.DoesNotExist:
-        pass
-    try:
+        
+    if email and User.objects.filter(email=email).exists():
         user = User.objects.get(email=email)
         return Response({**UserSerializer(user).data, 'is_new': False})
-    except User.DoesNotExist:
-        pass
-    user = User.objects.create(
-        username=username or email,
-        email=email or f'{username}@brainspark.app'
-    )
-    return Response({**UserSerializer(user).data, 'is_new': True})
+        
+    return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)

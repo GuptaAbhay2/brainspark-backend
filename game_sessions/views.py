@@ -1,4 +1,5 @@
 import datetime
+import traceback
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
@@ -17,7 +18,6 @@ class GameSessionSerializer(serializers.ModelSerializer):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def submit_score(request):
-    """Submit game result — updates user brain_score and streak safely"""
     try:
         user_id    = request.data.get('user_id')
         puzzle_id  = request.data.get('puzzle_id')
@@ -26,28 +26,15 @@ def submit_score(request):
         hints_used = request.data.get('hints_used', 0)
         completed  = request.data.get('completed', False)
 
-        # 1. Fetch User
         try:
             user = User.objects.get(id=user_id)
         except User.DoesNotExist:
-            return Response({'error': f'User with ID {user_id} not found'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': f'User {user_id} not found'}, status=404)
 
-        # 2. Safe Puzzle Fetch (Prevents ForeignKey IntegrityError)
         puzzle = None
         if puzzle_id:
             puzzle = Puzzle.objects.filter(id=puzzle_id).first()
 
-        if not puzzle:
-            puzzle = Puzzle.objects.first()
-
-        # If Supabase has zero puzzles created yet, create a dummy puzzle on the fly
-        if not puzzle:
-            puzzle, _ = Puzzle.objects.get_or_create(
-                id=1,
-                defaults={'title': 'Default Puzzle', 'difficulty': 'easy'}
-            )
-
-        # 3. Create Session
         session = GameSession.objects.create(
             user=user,
             puzzle=puzzle,
@@ -57,20 +44,13 @@ def submit_score(request):
             completed=bool(completed)
         )
 
-        # 4. Safe Score Update
-        try:
-            added_score = int(score) if score is not None else 0
-        except (ValueError, TypeError):
-            added_score = 0
-
-        user.brain_score = (user.brain_score or 0) + added_score
+        user.brain_score = (user.brain_score or 0) + (int(score) if score else 0)
         user.total_games = (user.total_games or 0) + 1
 
-        # 5. Streak Logic
         curr_streak = user.current_streak or 0
         long_streak = user.longest_streak or 0
-
         today = timezone.now().date()
+
         if user.last_played:
             diff = (today - user.last_played).days
             if diff == 1:
@@ -96,11 +76,13 @@ def submit_score(request):
         }, status=status.HTTP_201_CREATED)
 
     except Exception as e:
+        print("======== EXACT PYTHON CRASH LOG START ========")
+        traceback.print_exc()
+        print("======== EXACT PYTHON CRASH LOG END ========")
         return Response({'server_crash_error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def user_history(request, user_id):
-    """Get last 20 sessions for a user"""
     sessions = GameSession.objects.filter(user_id=user_id)[:20]
     return Response(GameSessionSerializer(sessions, many=True).data)

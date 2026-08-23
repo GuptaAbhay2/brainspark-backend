@@ -25,7 +25,7 @@ def submit_score(request):
     hints_used = request.data.get('hints_used', 0)
     completed  = request.data.get('completed', False)
 
-    # 1. Fetch User (Strict Check)
+    # 1. Fetch User
     try:
         user = User.objects.get(id=user_id)
     except User.DoesNotExist:
@@ -33,39 +33,52 @@ def submit_score(request):
             'error': f'User with ID {user_id} does not exist in Database.'
         }, status=status.HTTP_404_NOT_FOUND)
 
-    # 2. Fetch Puzzle (Graceful Fallback - handles missing or invalid puzzle_id)
+    # 2. Fetch Puzzle
     puzzle = None
     if puzzle_id:
         puzzle = Puzzle.objects.filter(id=puzzle_id).first()
 
-    # 3. Create Game Session Record
+    # 3. Create Game Session
     session = GameSession.objects.create(
         user=user,
         puzzle=puzzle,
-        score=score,
-        time_taken=time_taken,
-        hints_used=hints_used,
+        score=score or 0,
+        time_taken=time_taken or 0,
+        hints_used=hints_used or 0,
         completed=completed
     )
 
-    # 4. Update User Profile Scores
-    user.brain_score += int(score)
-    user.total_games += 1
+    # 4. Safe Score Handling (Prevents NULL + Number crash)
+    try:
+        added_score = int(score) if score is not None else 0
+    except (ValueError, TypeError):
+        added_score = 0
 
-    # 5. Streak Logic Calculation
+    current_brain_score = user.brain_score if user.brain_score is not None else 0
+    current_total_games = user.total_games if user.total_games is not None else 0
+
+    user.brain_score = current_brain_score + added_score
+    user.total_games = current_total_games + 1
+
+    # 5. Safe Streak Logic
+    curr_streak = user.current_streak if user.current_streak is not None else 0
+    long_streak = user.longest_streak if user.longest_streak is not None else 0
+
     today = timezone.now().date()
     if user.last_played:
         diff = (today - user.last_played).days
         if diff == 1:
-            user.current_streak += 1
+            curr_streak += 1
         elif diff > 1:
-            user.current_streak = 1
+            curr_streak = 1
     else:
-        user.current_streak = 1
+        curr_streak = 1
 
-    if user.current_streak > user.longest_streak:
-        user.longest_streak = user.current_streak
+    if curr_streak > long_streak:
+        long_streak = curr_streak
 
+    user.current_streak = curr_streak
+    user.longest_streak = long_streak
     user.last_played = today
     user.save()
 

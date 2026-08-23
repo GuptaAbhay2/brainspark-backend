@@ -4,7 +4,7 @@ from puzzles.models import Puzzle
 
 class GameSession(models.Model):
     user        = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sessions')
-    puzzle      = models.ForeignKey(Puzzle, on_delete=models.CASCADE)
+    puzzle = models.ForeignKey(Puzzle, on_delete=models.SET_NULL, null=True, blank=True)
     score       = models.IntegerField(default=0)
     time_taken  = models.IntegerField(default=0)   # seconds
     hints_used  = models.IntegerField(default=0)

@@ -1,3 +1,4 @@
+import datetime
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
@@ -7,7 +8,6 @@ from django.utils import timezone
 from .models import GameSession
 from users.models import User
 from puzzles.models import Puzzle
-import datetime
 
 class GameSessionSerializer(serializers.ModelSerializer):
     class Meta:
@@ -17,7 +17,7 @@ class GameSessionSerializer(serializers.ModelSerializer):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def submit_score(request):
-    """Submit game result — updates user brain_score and streak"""
+    """Submit game result — updates user brain_score and streak safely"""
     user_id    = request.data.get('user_id')
     puzzle_id  = request.data.get('puzzle_id')
     score      = request.data.get('score', 0)
@@ -25,24 +25,34 @@ def submit_score(request):
     hints_used = request.data.get('hints_used', 0)
     completed  = request.data.get('completed', False)
 
+    # 1. Fetch User (Strict Check)
     try:
-        user   = User.objects.get(id=user_id)
-        puzzle = Puzzle.objects.get(id=puzzle_id)
-    except (User.DoesNotExist, Puzzle.DoesNotExist):
-        return Response({'error': 'User or Puzzle not found'}, status=404)
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({
+            'error': f'User with ID {user_id} does not exist in Database.'
+        }, status=status.HTTP_404_NOT_FOUND)
 
-    # Create session
+    # 2. Fetch Puzzle (Graceful Fallback - handles missing or invalid puzzle_id)
+    puzzle = None
+    if puzzle_id:
+        puzzle = Puzzle.objects.filter(id=puzzle_id).first()
+
+    # 3. Create Game Session Record
     session = GameSession.objects.create(
-        user=user, puzzle=puzzle,
-        score=score, time_taken=time_taken,
-        hints_used=hints_used, completed=completed
+        user=user,
+        puzzle=puzzle,
+        score=score,
+        time_taken=time_taken,
+        hints_used=hints_used,
+        completed=completed
     )
 
-    # Update user brain_score + total_games
-    user.brain_score += score
+    # 4. Update User Profile Scores
+    user.brain_score += int(score)
     user.total_games += 1
 
-    # Update streak
+    # 5. Streak Logic Calculation
     today = timezone.now().date()
     if user.last_played:
         diff = (today - user.last_played).days
@@ -50,7 +60,6 @@ def submit_score(request):
             user.current_streak += 1
         elif diff > 1:
             user.current_streak = 1
-        # diff == 0 means already played today, no change
     else:
         user.current_streak = 1
 

@@ -18,76 +18,85 @@ class GameSessionSerializer(serializers.ModelSerializer):
 @permission_classes([AllowAny])
 def submit_score(request):
     """Submit game result — updates user brain_score and streak safely"""
-    user_id    = request.data.get('user_id')
-    puzzle_id  = request.data.get('puzzle_id')
-    score      = request.data.get('score', 0)
-    time_taken = request.data.get('time_taken', 0)
-    hints_used = request.data.get('hints_used', 0)
-    completed  = request.data.get('completed', False)
-
-    # 1. Fetch User
     try:
-        user = User.objects.get(id=user_id)
-    except User.DoesNotExist:
-        return Response({
-            'error': f'User with ID {user_id} does not exist in Database.'
-        }, status=status.HTTP_404_NOT_FOUND)
+        user_id    = request.data.get('user_id')
+        puzzle_id  = request.data.get('puzzle_id')
+        score      = request.data.get('score', 0)
+        time_taken = request.data.get('time_taken', 0)
+        hints_used = request.data.get('hints_used', 0)
+        completed  = request.data.get('completed', False)
 
-    # 2. Fetch Puzzle
-    puzzle = None
-    if puzzle_id:
-        puzzle = Puzzle.objects.filter(id=puzzle_id).first()
+        # 1. Fetch User
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response({'error': f'User with ID {user_id} not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    # 3. Create Game Session
-    session = GameSession.objects.create(
-        user=user,
-        puzzle=puzzle,
-        score=score or 0,
-        time_taken=time_taken or 0,
-        hints_used=hints_used or 0,
-        completed=completed
-    )
+        # 2. Safe Puzzle Fetch (Prevents ForeignKey IntegrityError)
+        puzzle = None
+        if puzzle_id:
+            puzzle = Puzzle.objects.filter(id=puzzle_id).first()
 
-    # 4. Safe Score Handling (Prevents NULL + Number crash)
-    try:
-        added_score = int(score) if score is not None else 0
-    except (ValueError, TypeError):
-        added_score = 0
+        if not puzzle:
+            puzzle = Puzzle.objects.first()
 
-    current_brain_score = user.brain_score if user.brain_score is not None else 0
-    current_total_games = user.total_games if user.total_games is not None else 0
+        # If Supabase has zero puzzles created yet, create a dummy puzzle on the fly
+        if not puzzle:
+            puzzle, _ = Puzzle.objects.get_or_create(
+                id=1,
+                defaults={'title': 'Default Puzzle', 'difficulty': 'easy'}
+            )
 
-    user.brain_score = current_brain_score + added_score
-    user.total_games = current_total_games + 1
+        # 3. Create Session
+        session = GameSession.objects.create(
+            user=user,
+            puzzle=puzzle,
+            score=score or 0,
+            time_taken=time_taken or 0,
+            hints_used=hints_used or 0,
+            completed=bool(completed)
+        )
 
-    # 5. Safe Streak Logic
-    curr_streak = user.current_streak if user.current_streak is not None else 0
-    long_streak = user.longest_streak if user.longest_streak is not None else 0
+        # 4. Safe Score Update
+        try:
+            added_score = int(score) if score is not None else 0
+        except (ValueError, TypeError):
+            added_score = 0
 
-    today = timezone.now().date()
-    if user.last_played:
-        diff = (today - user.last_played).days
-        if diff == 1:
-            curr_streak += 1
-        elif diff > 1:
+        user.brain_score = (user.brain_score or 0) + added_score
+        user.total_games = (user.total_games or 0) + 1
+
+        # 5. Streak Logic
+        curr_streak = user.current_streak or 0
+        long_streak = user.longest_streak or 0
+
+        today = timezone.now().date()
+        if user.last_played:
+            diff = (today - user.last_played).days
+            if diff == 1:
+                curr_streak += 1
+            elif diff > 1:
+                curr_streak = 1
+        else:
             curr_streak = 1
-    else:
-        curr_streak = 1
 
-    if curr_streak > long_streak:
-        long_streak = curr_streak
+        if curr_streak > long_streak:
+            long_streak = curr_streak
 
-    user.current_streak = curr_streak
-    user.longest_streak = long_streak
-    user.last_played = today
-    user.save()
+        user.current_streak = curr_streak
+        user.longest_streak = long_streak
+        user.last_played = today
+        user.save()
 
-    return Response({
-        'session_id': session.id,
-        'brain_score': user.brain_score,
-        'current_streak': user.current_streak,
-        'longest_streak': user.longest_streak,
-    }, status=status.HTTP_201_CREATED)
+        return Response({
+            'session_id': session.id,
+            'brain_score': user.brain_score,
+            'current_streak': user.current_streak,
+            'longest_streak': user.longest_streak,
+        }, status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        return Response({'server_crash_error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
 @permission_classes([AllowAny])

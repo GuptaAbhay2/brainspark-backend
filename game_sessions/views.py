@@ -21,8 +21,8 @@ def submit_score(request):
     try:
         user_id    = request.data.get('user_id')
         puzzle_id  = request.data.get('puzzle_id')
-        score      = request.data.get('score', 0)
-        time_taken = request.data.get('time_taken', 0)
+        score      = int(request.data.get('score', 0))
+        time_taken = int(request.data.get('time_taken', 0))
         hints_used = request.data.get('hints_used', 0)
         completed  = request.data.get('completed', False)
 
@@ -31,16 +31,20 @@ def submit_score(request):
         except User.DoesNotExist:
             return Response({'error': f'User {user_id} not found'}, status=404)
 
-        # 🛑 BUG FIX: Purane APK builds me refresh karne par time_taken = 0 aata hai.
-        # Agar time_taken 0 hai, toh score/streak increment skip kar do.
-        if int(time_taken or 0) == 0:
+        # 🛑 REFRESH FILTER:
+        # Screen refresh karne par agar frontend cumulative score bhejta hai
+        # (jo User ke actual total brain_score ke barabar ho), toh DB session create skip karo.
+        if user.brain_score and user.brain_score > 0 and score == user.brain_score:
             return Response({
                 'session_id': None,
-                'brain_score': user.brain_score or 0,
+                'brain_score': user.brain_score,
                 'current_streak': user.current_streak or 0,
                 'longest_streak': user.longest_streak or 0,
             }, status=status.HTTP_200_OK)
 
+        # ✅ REAL GAMEPLAY SESSION:
+        # Jab koi real game khelega (Score +10, +50 etc.), toh DB mein session create hoga
+        # aur score sabhi devices par sync hoga.
         puzzle = None
         if puzzle_id:
             puzzle = Puzzle.objects.filter(id=puzzle_id).first()
@@ -48,18 +52,18 @@ def submit_score(request):
         session = GameSession.objects.create(
             user=user,
             puzzle=puzzle,
-            score=score or 0,
-            time_taken=time_taken or 0,
+            score=score,
+            time_taken=time_taken,
             hints_used=hints_used or 0,
             completed=bool(completed)
         )
 
-        user.brain_score = (user.brain_score or 0) + (int(score) if score else 0)
+        user.brain_score = (user.brain_score or 0) + score
         user.total_games = (user.total_games or 0) + 1
 
+        today = timezone.now().date()
         curr_streak = user.current_streak or 0
         long_streak = user.longest_streak or 0
-        today = timezone.now().date()
 
         if user.last_played:
             diff = (today - user.last_played).days

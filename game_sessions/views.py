@@ -26,25 +26,50 @@ def submit_score(request):
         hints_used = request.data.get('hints_used', 0)
         completed  = request.data.get('completed', False)
 
+        # Handle string booleans from JSON safely
+        if isinstance(completed, str):
+            completed = completed.lower() in ['true', '1']
+        else:
+            completed = bool(completed)
+
         try:
             user = User.objects.get(id=user_id)
         except User.DoesNotExist:
             return Response({'error': f'User {user_id} not found'}, status=404)
 
-        # 🛑 REFRESH FILTER:
-        # Screen refresh karne par agar frontend cumulative score bhejta hai
-        # (jo User ke actual total brain_score ke barabar ho), toh DB session create skip karo.
+        # User ka latest session fetch karo
+        last_session = GameSession.objects.filter(user=user).order_by('-id').first()
+
+        is_refresh = False
+
+        # 🛑 REFRESH DETECTORS:
+        # 1. Score 0 ya negative ho
+        if score <= 0:
+            is_refresh = True
+
+        # 2. Score user ke Total Brain Score ke barabar sent hua ho
         if user.brain_score and user.brain_score > 0 and score == user.brain_score:
+            is_refresh = True
+
+        # 3. Game completion markers (puzzle_id and completed flag) missing hon
+        if not puzzle_id and not completed:
+            is_refresh = True
+
+        # 4. Same score baar-baar refresh pe re-submit ho raha ho
+        if last_session and last_session.score == score:
+            if not puzzle_id or not completed:
+                is_refresh = True
+
+        # Agar Refresh request hai toh DB score increment SKIP karo
+        if is_refresh:
             return Response({
-                'session_id': None,
-                'brain_score': user.brain_score,
+                'session_id': last_session.id if last_session else None,
+                'brain_score': user.brain_score or 0,
                 'current_streak': user.current_streak or 0,
                 'longest_streak': user.longest_streak or 0,
             }, status=status.HTTP_200_OK)
 
         # ✅ REAL GAMEPLAY SESSION:
-        # Jab koi real game khelega (Score +10, +50 etc.), toh DB mein session create hoga
-        # aur score sabhi devices par sync hoga.
         puzzle = None
         if puzzle_id:
             puzzle = Puzzle.objects.filter(id=puzzle_id).first()
@@ -55,7 +80,7 @@ def submit_score(request):
             score=score,
             time_taken=time_taken,
             hints_used=hints_used or 0,
-            completed=bool(completed)
+            completed=completed
         )
 
         user.brain_score = (user.brain_score or 0) + score

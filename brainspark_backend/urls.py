@@ -29,6 +29,7 @@ urlpatterns = [
     # Leaderboard
     path('api/leaderboard/global/',      lb_views.global_leaderboard),
     path('api/leaderboard/weekly/',      lb_views.weekly_leaderboard),
+    path('api/leaderboard/daily/',      lb_views.daily_leaderboard),
     path('api/leaderboard/rank/<int:user_id>/', lb_views.user_rank),
 
     # Daily challenge

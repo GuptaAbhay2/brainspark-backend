@@ -31,6 +31,16 @@ def submit_score(request):
         except User.DoesNotExist:
             return Response({'error': f'User {user_id} not found'}, status=404)
 
+        # 🛑 BUG FIX: Purane APK builds me refresh karne par time_taken = 0 aata hai.
+        # Agar time_taken 0 hai, toh score/streak increment skip kar do.
+        if int(time_taken or 0) == 0:
+            return Response({
+                'session_id': None,
+                'brain_score': user.brain_score or 0,
+                'current_streak': user.current_streak or 0,
+                'longest_streak': user.longest_streak or 0,
+            }, status=status.HTTP_200_OK)
+
         puzzle = None
         if puzzle_id:
             puzzle = Puzzle.objects.filter(id=puzzle_id).first()
